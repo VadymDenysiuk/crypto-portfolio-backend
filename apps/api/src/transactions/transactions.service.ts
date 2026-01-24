@@ -1,14 +1,23 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
+import { InjectQueue } from '@nestjs/bullmq';
+import type { Queue } from 'bullmq';
+import { RedisService } from 'src/redis/redis.service';
 
 @Injectable()
 export class TransactionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redisService: RedisService,
+    @InjectQueue('portfolio') private readonly portfolioQueue: Queue,
+  ) {}
 
   async create(dto: CreateTransactionDto) {
+    const portfolioId = dto.portfolioId;
+
     const portfolio = await this.prisma.client.portfolio.findFirst({
-      where: { id: dto.portfolioId, userId: 'dev-user' },
+      where: { id: portfolioId, userId: 'dev-user' },
       select: { id: true },
     });
     if (!portfolio) throw new NotFoundException('Portfolio not found');
@@ -19,9 +28,9 @@ export class TransactionsService {
     });
     if (!asset) throw new NotFoundException('Asset not found');
 
-    return this.prisma.client.transaction.create({
+    const tx = await this.prisma.client.transaction.create({
       data: {
-        portfolioId: dto.portfolioId,
+        portfolioId: portfolioId,
         assetId: asset.id,
         type: dto.type,
         quantity: dto.quantity.toString(),
@@ -30,6 +39,26 @@ export class TransactionsService {
       },
       include: { asset: { select: { symbol: true } } },
     });
+
+    await this.redisService.redis.del(`portfolio:summary:${portfolioId}`);
+
+    try {
+      await this.portfolioQueue.add(
+        'recalc-summary',
+        { portfolioId },
+        {
+          jobId: `recalc-summary:${portfolioId}`,
+          removeOnComplete: true,
+          removeOnFail: 100,
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 2000 },
+        },
+      );
+    } catch (e) {
+      console.error(e);
+    }
+
+    return tx;
   }
 
   list(portfolioId?: string) {

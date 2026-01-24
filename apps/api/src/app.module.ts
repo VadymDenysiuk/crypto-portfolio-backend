@@ -7,6 +7,8 @@ import { RedisModule } from './redis/redis.module';
 import { PricesModule } from './prices/prices.module';
 import { PortfoliosModule } from './portfolios/portfolios.module';
 import { TransactionsModule } from './transactions/transactions.module';
+import { BullModule } from '@nestjs/bullmq';
+import { bullConnection } from './bullmq/bullmq.connection';
 
 @Module({
   imports: [
@@ -16,6 +18,10 @@ import { TransactionsModule } from './transactions/transactions.module';
     PricesModule,
     PortfoliosModule,
     TransactionsModule,
+    BullModule.forRoot({
+      connection: bullConnection(),
+    }),
+    BullModule.registerQueue({ name: 'portfolio' }),
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -5,9 +5,22 @@ import { RedisModule } from './redis/redis.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PricesModule } from './prices/prices.module';
+import { BullModule } from '@nestjs/bullmq';
+import { bullConnection } from './bullmq/bullmq.connection';
+import { PortfolioModule } from './portfolio/portfolio.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), PrismaModule, RedisModule, PricesModule],
+  imports: [
+    ScheduleModule.forRoot(),
+    PrismaModule,
+    RedisModule,
+    PricesModule,
+    BullModule.forRoot({
+      connection: bullConnection(),
+    }),
+    BullModule.registerQueue({ name: 'portfolio' }),
+    PortfolioModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })

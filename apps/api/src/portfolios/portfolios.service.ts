@@ -2,12 +2,16 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricesService } from '../prices/prices.service';
 import { CreatePortfolioDto } from './dto/create-portfolio.dto';
+import { RedisService } from 'src/redis/redis.service';
+import { safeParseJson } from 'src/utils/json';
+import { PortfolioSummary } from './portfolio.types';
 
 @Injectable()
 export class PortfoliosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly prices: PricesService,
+    private readonly redisService: RedisService,
   ) {}
 
   async create(dto: CreatePortfolioDto) {
@@ -40,6 +44,14 @@ export class PortfoliosService {
   }
 
   async summary(portfolioId: string) {
+    const key = `portfolio:summary:${portfolioId}`;
+    const cached = await this.redisService.redis.get(key);
+
+    if (cached) {
+      const parsed = safeParseJson<PortfolioSummary>(cached);
+      if (parsed) return { source: 'redis' as const, ...parsed };
+    }
+
     const portfolio = await this.prisma.client.portfolio.findFirst({
       where: { id: portfolioId, userId: 'dev-user' },
       select: { id: true, baseCurrency: true, name: true },
@@ -52,7 +64,6 @@ export class PortfoliosService {
       select: {
         type: true,
         quantity: true,
-        price: true,
         asset: { select: { symbol: true } },
       },
       orderBy: { at: 'asc' },
@@ -62,7 +73,7 @@ export class PortfoliosService {
     for (const t of txs) {
       const sym = t.asset.symbol;
       const qty = Number(t.quantity);
-      if (!holdings[sym]) holdings[sym] = 0;
+      holdings[sym] ??= 0;
 
       if (t.type === 'BUY') holdings[sym] += qty;
       else if (t.type === 'SELL') holdings[sym] -= qty;
@@ -77,14 +88,14 @@ export class PortfoliosService {
 
     let totalValue = 0;
     const rows = symbols.map((s) => {
-      const qty = holdings[s];
-      const p = prices[s] ?? 0;
-      const value = qty * p;
+      const quantity = holdings[s];
+      const price = prices[s] ?? 0;
+      const value = quantity * price;
       totalValue += value;
-      return { symbol: s, quantity: qty, price: p, value };
+      return { symbol: s, quantity, price, value };
     });
 
-    return {
+    const result = {
       portfolio: {
         id: portfolio.id,
         name: portfolio.name,
@@ -95,5 +106,14 @@ export class PortfoliosService {
       totalValue,
       holdings: rows,
     };
+
+    await this.redisService.redis.set(
+      key,
+      JSON.stringify(result),
+      'EX',
+      60 * 10,
+    );
+
+    return { source: 'computed', ...result };
   }
 }
