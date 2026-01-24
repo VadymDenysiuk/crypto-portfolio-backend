@@ -3,9 +3,11 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { AssetsModule } from './assets/assets.module';
+import { RedisModule } from './redis/redis.module';
+import { PricesModule } from './prices/prices.module';
 
 @Module({
-  imports: [PrismaModule, AssetsModule],
+  imports: [PrismaModule, AssetsModule, RedisModule, PricesModule],
   controllers: [AppController],
   providers: [AppService],
 })
