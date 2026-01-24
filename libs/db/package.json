@@ -1,0 +1,18 @@
+{
+  "name": "@cpt/db",
+  "private": true,
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate dev",
+    "seed": "node ./dist/seed.js",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.7",
+    "prisma": "6.19.2",
+    "typescript": "^5.0.0"
+  }
+}

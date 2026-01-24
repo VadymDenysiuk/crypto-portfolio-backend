@@ -1,0 +1,29 @@
+{
+  "name": "crypto-portfolio-tracker",
+  "private": true,
+  "packageManager": "pnpm@10.28.1",
+  "scripts": {
+    "dev": "pnpm -r dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "db:migrate": "pnpm --filter @cpt/db migrate",
+    "db:generate": "pnpm --filter @cpt/db generate",
+    "db:seed": "pnpm --filter @cpt/db seed"
+  },
+  "pnpm": {
+    "overrides": {
+      "prisma": "6.19.2",
+      "@prisma/client": "6.19.2",
+      "@prisma/engines": "6.19.2"
+    },
+    "ignoredBuiltDependencies": [
+      "@nestjs/core",
+      "unrs-resolver"
+    ],
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma"
+    ]
+  }
+}
