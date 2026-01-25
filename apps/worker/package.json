@@ -26,6 +26,7 @@
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/schedule": "^6.1.0",
+    "@nestjs/terminus": "^11.0.0",
     "bullmq": "^5.67.0",
     "ioredis": "^5.9.2",
     "reflect-metadata": "^0.2.2",

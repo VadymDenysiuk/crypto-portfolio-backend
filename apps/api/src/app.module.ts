@@ -9,6 +9,7 @@ import { PortfoliosModule } from './portfolios/portfolios.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { BullModule } from '@nestjs/bullmq';
 import { bullConnection } from './bullmq/bullmq.connection';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { bullConnection } from './bullmq/bullmq.connection';
       connection: bullConnection(),
     }),
     BullModule.registerQueue({ name: 'portfolio' }),
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [AppService],
