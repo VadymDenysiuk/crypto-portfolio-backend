@@ -34,10 +34,10 @@ jobs:
         run: pnpm --filter @cpt/db run generate
 
       - name: Lint
-        run: pnpm -r run lint --if-present
+        run: pnpm --filter ./apps/api... --filter ./apps/worker... run lint
 
       - name: Test
-        run: pnpm -r run test --if-present
+        run: pnpm --filter ./apps/api... --filter ./apps/worker... run test
 
       - name: Build
-        run: pnpm -r run build --if-present
+        run: pnpm --filter ./apps/api... --filter ./apps/worker... run build
