@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cpt-postgres
+    environment:
+      POSTGRES_DB: cpt
+      POSTGRES_USER: cpt
+      POSTGRES_PASSWORD: cpt
+    ports:
+      - "5433:5432"
+    volumes:
+      - cpt_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cpt -d cpt"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: cpt-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - cpt_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    container_name: cpt-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://cpt:cpt@postgres:5432/cpt
+      REDIS_URL: redis://redis:6379
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: apps/worker/Dockerfile
+    container_name: cpt-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://cpt:cpt@postgres:5432/cpt
+      REDIS_URL: redis://redis:6379
+      PORT: "3001"
+    ports:
+      - "3001:3001"
+
+volumes:
+  cpt_pg:
+  cpt_redis:

@@ -48,7 +48,7 @@ export class TransactionsService {
         { portfolioId },
         {
           jobId: `recalc-summary:${portfolioId}`,
-          removeOnComplete: true,
+          removeOnComplete: false,
           removeOnFail: 100,
           attempts: 3,
           backoff: { type: 'exponential', delay: 2000 },
