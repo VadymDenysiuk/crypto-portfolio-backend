@@ -10,7 +10,8 @@
     "skipLibCheck": true,
     "types": ["node"],
     "declaration": true,
-    "declarationMap": true
+    "declarationMap": true,
+    "emitDeclarationOnly": false
   },
   "include": ["src"]
 }

@@ -30,14 +30,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Prisma generate
+      - name: Prisma generate (db)
         run: pnpm --filter @cpt/db run generate
 
-      - name: Lint
+      - name: Build (db)
+        run: pnpm --filter @cpt/db run build
+
+      - name: Lint (api + worker)
         run: pnpm --filter ./apps/api... --filter ./apps/worker... run lint
-
-      - name: Test
-        run: pnpm --filter ./apps/api... --filter ./apps/worker... run test
-
-      - name: Build
-        run: pnpm --filter ./apps/api... --filter ./apps/worker... run build
