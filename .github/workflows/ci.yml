@@ -31,7 +31,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Prisma generate
-        run: pnpm --filter ./libs/db... run db:generate --if-present
+        run: pnpm --filter @cpt/db run generate
 
       - name: Lint
         run: pnpm -r run lint --if-present
