@@ -1,0 +1,61 @@
+name: Deploy (VPS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to deploy (main, sha-xxxx, v0.1.0)"
+        required: true
+        default: "main"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload docker-compose.prod.yml
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "infra/docker/docker-compose.prod.yml"
+          target: "${{ secrets.DEPLOY_PATH }}"
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+
+            cp infra/docker/docker-compose.prod.yml docker-compose.yml
+
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
+
+            TAG="${{ inputs.tag }}" docker compose pull
+            TAG="${{ inputs.tag }}" docker compose up -d
+
+            docker compose ps
+
+      - name: Healthcheck (API)
+        run: |
+          set -e
+          for i in {1..30}; do
+            if curl -fsS "http://${{ secrets.VPS_HOST }}:3000/healthz" >/dev/null; then
+              echo "API healthz OK"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API healthcheck FAILED"
+          exit 1
