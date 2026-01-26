@@ -1,18 +1,12 @@
 services:
   postgres:
     image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-cpt}
-      POSTGRES_USER: ${POSTGRES_USER:-cpt}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cpt}
+    env_file:
+      - .env.prod
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-cpt} -d ${POSTGRES_DB:-cpt}",
-        ]
+      test: ["CMD-SHELL", "pg_isready -U cpt -d cpt"]
       interval: 5s
       timeout: 3s
       retries: 20

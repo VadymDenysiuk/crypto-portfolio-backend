@@ -42,8 +42,8 @@ jobs:
 
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
 
-            TAG="${{ inputs.tag }}" docker compose pull
-            TAG="${{ inputs.tag }}" docker compose up -d
+            TAG="${{ inputs.tag }}" docker compose --env-file .env.prod pull
+            TAG="${{ inputs.tag }}" docker compose --env-file .env.prod up -d
 
             docker compose ps
 
