@@ -6,6 +6,7 @@
   "scripts": {
     "generate": "prisma generate",
     "migrate": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
     "seed": "node ./dist/seed.js",
     "build": "tsc -p tsconfig.json"
   },
