@@ -52,14 +52,17 @@ jobs:
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
 
             DEPLOY_TAG="${{ steps.resolve.outputs.tag }}"
-            echo "Deploying tag: ${DEPLOY_TAG}"
 
-            # Verify image exists in GHCR (api image)
             if ! docker manifest inspect "ghcr.io/vadymdenysiuk/crypto-portfolio-api:${DEPLOY_TAG}" >/dev/null 2>&1; then
-              echo "ERROR: Image tag not found in GHCR: ${DEPLOY_TAG}"
-              echo "Tip: run Build & Push first, or deploy tag=main, or specify an existing sha- tag."
-              exit 1
+              DEPLOY_TAG="sha-$(echo "${{ github.sha }}" | cut -c1-7)"
+              echo "Long sha tag not found, fallback to: ${DEPLOY_TAG}"
             fi
+
+            # validate both images exist
+            docker manifest inspect "ghcr.io/vadymdenysiuk/crypto-portfolio-api:${DEPLOY_TAG}" >/dev/null
+            docker manifest inspect "ghcr.io/vadymdenysiuk/crypto-portfolio-worker:${DEPLOY_TAG}" >/dev/null
+
+            echo "Deploying tag: ${DEPLOY_TAG}"
 
             TAG="${DEPLOY_TAG}" docker compose --env-file .env.prod pull
             TAG="${DEPLOY_TAG}" docker compose --profile ops --env-file .env.prod run --rm migrate
