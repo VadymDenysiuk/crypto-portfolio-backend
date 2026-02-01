@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Image tag to deploy (main, sha-xxxx, v0.1.0)"
-        required: true
-        default: "main"
+        description: "Optional. Image tag to deploy (e.g. sha-xxxx, v0.1.0). Empty = sha of this run."
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -28,6 +28,15 @@ jobs:
           source: "infra/docker/docker-compose.prod.yml,infra/caddy/Caddyfile"
           target: "${{ secrets.DEPLOY_PATH }}"
 
+      - name: Resolve deploy tag
+        id: resolve
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+            echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=sha-${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -42,20 +51,21 @@ jobs:
 
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
 
-            TAG="${{ inputs.tag }}" docker compose --env-file .env.prod pull
+            DEPLOY_TAG="${{ steps.resolve.outputs.tag }}"
+            echo "Deploying tag: ${DEPLOY_TAG}"
 
-            # ✅ Prisma migrations (prod-safe)
-            TAG="${{ inputs.tag }}" docker compose --profile ops --env-file .env.prod run --rm migrate
-
-            TAG="${{ inputs.tag }}" docker compose --env-file .env.prod up -d
+            TAG="${DEPLOY_TAG}" docker compose --env-file .env.prod pull
+            TAG="${DEPLOY_TAG}" docker compose --profile ops --env-file .env.prod run --rm migrate
+            TAG="${DEPLOY_TAG}" docker compose --env-file .env.prod up -d
 
             docker compose ps
+            docker compose images
 
       - name: Healthcheck (API)
         run: |
           set -e
           for i in {1..45}; do
-            if curl -fsS "https://api.cpt-lab.website/healthz" >/dev/null; then
+            if curl -fsS --retry 2 --retry-delay 1 "https://api.cpt-lab.website/healthz" >/dev/null; then
               echo "API healthz OK"
               exit 0
             fi
