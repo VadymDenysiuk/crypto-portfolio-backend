@@ -11,6 +11,7 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+    networks: [cpt]
 
   redis:
     image: redis:7-alpine
@@ -23,19 +24,19 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+    networks: [cpt]
 
   api:
     image: ghcr.io/vadymdenysiuk/crypto-portfolio-api:${TAG:-main}
     env_file:
       - .env.prod
-    ports:
-      - "3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
+    networks: [cpt]
 
   worker:
     image: ghcr.io/vadymdenysiuk/crypto-portfolio-worker:${TAG:-main}
@@ -47,7 +48,27 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    networks: [cpt]
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    networks: [cpt]
+
+networks:
+  cpt:
 
 volumes:
   postgres_data:
   redis_data:
+  caddy_data:
+  caddy_config:

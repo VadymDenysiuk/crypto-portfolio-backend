@@ -1,0 +1,11 @@
+cpt-lab.website {
+  reverse_proxy api:3000
+
+  encode gzip zstd
+
+  header {
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+  }
+}
