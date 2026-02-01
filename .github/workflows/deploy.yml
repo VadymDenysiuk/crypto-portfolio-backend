@@ -45,9 +45,7 @@ jobs:
             TAG="${{ inputs.tag }}" docker compose --env-file .env.prod pull
 
             # ✅ Prisma migrations (prod-safe)
-            TAG="${{ inputs.tag }}" docker compose --env-file .env.prod run --rm \
-              --entrypoint pnpm api \
-              --filter ./libs/db... run migrate:deploy
+            TAG="${{ inputs.tag }}" docker compose --env-file .env.prod run --rm migrate
 
             TAG="${{ inputs.tag }}" docker compose --env-file .env.prod up -d
 
