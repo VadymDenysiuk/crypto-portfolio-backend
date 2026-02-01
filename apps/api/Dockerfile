@@ -31,7 +31,8 @@ FROM base AS prod-deps
 ENV CI=true
 COPY . .
 RUN corepack prepare pnpm@${PNPM_VERSION} --activate \
-  && pnpm install --prod --frozen-lockfile
+  && pnpm install --prod --frozen-lockfile \
+  && pnpm --filter @cpt/db generate
 
 # --------------------------
 # runner (runtime)
