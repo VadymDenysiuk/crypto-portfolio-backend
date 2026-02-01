@@ -45,7 +45,7 @@ jobs:
             TAG="${{ inputs.tag }}" docker compose --env-file .env.prod pull
 
             # ✅ Prisma migrations (prod-safe)
-            TAG="${{ inputs.tag }}" docker compose --env-file .env.prod run --rm migrate
+            TAG="${{ inputs.tag }}" docker compose --profile ops --env-file .env.prod run --rm migrate
 
             TAG="${{ inputs.tag }}" docker compose --env-file .env.prod up -d
 
@@ -55,7 +55,7 @@ jobs:
         run: |
           set -e
           for i in {1..45}; do
-            if curl -fsS "https://cpt-lab.website/healthz" >/dev/null; then
+            if curl -fsS "https://api.cpt-lab.website/healthz" >/dev/null; then
               echo "API healthz OK"
               exit 0
             fi

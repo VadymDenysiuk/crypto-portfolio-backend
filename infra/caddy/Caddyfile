@@ -1,4 +1,4 @@
-cpt-lab.website {
+api.cpt-lab.website {
   reverse_proxy api:3000
 
   encode gzip zstd
