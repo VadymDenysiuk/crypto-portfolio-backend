@@ -26,7 +26,7 @@ services:
     networks: [cpt]
 
   staging-api:
-    image: ghcr.io/vadymdenysiuk/crypto-portfolio-api:${TAG:-develop}
+    image: ghcr.io/vadymdenysiuk/crypto-portfolio-api:${TAG:-dev}
     env_file: [.env.staging]
     depends_on:
       postgres: { condition: service_healthy }
@@ -35,7 +35,7 @@ services:
     networks: [cpt]
 
   staging-worker:
-    image: ghcr.io/vadymdenysiuk/crypto-portfolio-worker:${TAG:-develop}
+    image: ghcr.io/vadymdenysiuk/crypto-portfolio-worker:${TAG:-dev}
     env_file: [.env.staging]
     depends_on:
       postgres: { condition: service_healthy }
@@ -44,7 +44,7 @@ services:
     networks: [cpt]
 
   migrate:
-    image: ghcr.io/vadymdenysiuk/crypto-portfolio-api:${TAG:-develop}
+    image: ghcr.io/vadymdenysiuk/crypto-portfolio-api:${TAG:-dev}
     env_file: [.env.staging]
     depends_on:
       postgres: { condition: service_healthy }

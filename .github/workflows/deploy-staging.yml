@@ -2,7 +2,7 @@ name: Deploy (STAGING)
 
 on:
   push:
-    branches: [develop]
+    branches: [dev]
   workflow_dispatch:
 
 permissions:
@@ -39,7 +39,7 @@ jobs:
 
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
 
-            DEPLOY_TAG="develop"
+            DEPLOY_TAG="dev"
             echo "Deploying staging tag: ${DEPLOY_TAG}"
 
             TAG="${DEPLOY_TAG}" docker compose --env-file .env.staging pull
