@@ -79,6 +79,8 @@ services:
 
 networks:
   cpt:
+    external: true
+    name: cpt_net
 
 volumes:
   postgres_data:

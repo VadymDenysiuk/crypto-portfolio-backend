@@ -1,0 +1,62 @@
+name: Deploy (STAGING)
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload staging compose
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "infra/docker/docker-compose.staging.yml"
+          target: "/opt/cpt-staging"
+
+      - name: Deploy staging via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /opt/cpt-staging
+
+            cp infra/docker/docker-compose.staging.yml docker-compose.yml
+
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
+
+            DEPLOY_TAG="develop"
+            echo "Deploying staging tag: ${DEPLOY_TAG}"
+
+            TAG="${DEPLOY_TAG}" docker compose --env-file .env.staging pull
+            TAG="${DEPLOY_TAG}" docker compose --profile ops --env-file .env.staging run --rm migrate
+            TAG="${DEPLOY_TAG}" docker compose --env-file .env.staging up -d
+
+            docker compose ps
+
+      - name: Healthcheck (STAGING API)
+        run: |
+          set -e
+          for i in {1..45}; do
+            if curl -fsS --retry 2 --retry-delay 1 "https://staging-api.cpt-lab.website/healthz" >/dev/null; then
+              echo "STAGING healthz OK"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "STAGING healthcheck FAILED"
+          exit 1

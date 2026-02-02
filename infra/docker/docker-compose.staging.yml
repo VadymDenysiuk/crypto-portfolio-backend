@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file: [.env.staging]
+    volumes:
+      - postgres_data_staging:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cpt -d cpt_staging"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks: [cpt]
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data_staging:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks: [cpt]
+
+  staging-api:
+    image: ghcr.io/vadymdenysiuk/crypto-portfolio-api:${TAG:-develop}
+    env_file: [.env.staging]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [cpt]
+
+  staging-worker:
+    image: ghcr.io/vadymdenysiuk/crypto-portfolio-worker:${TAG:-develop}
+    env_file: [.env.staging]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+    networks: [cpt]
+
+  migrate:
+    image: ghcr.io/vadymdenysiuk/crypto-portfolio-api:${TAG:-develop}
+    env_file: [.env.staging]
+    depends_on:
+      postgres: { condition: service_healthy }
+    entrypoint: ["/bin/sh", "-lc"]
+    command: ["pnpm --filter @cpt/db run migrate:deploy"]
+    restart: "no"
+    networks: [cpt]
+    profiles: ["ops"]
+
+networks:
+  cpt:
+    external: true
+    name: cpt_net
+
+volumes:
+  postgres_data_staging:
+  redis_data_staging:
