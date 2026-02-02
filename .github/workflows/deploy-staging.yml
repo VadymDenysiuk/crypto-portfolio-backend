@@ -1,9 +1,15 @@
 name: Deploy (STAGING)
 
 on:
-  push:
-    branches: [dev]
+  workflow_run:
+    workflows: ["Build & Push (GHCR)"]
+    types: [completed]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional override tag for staging (default: dev)"
+        required: false
+        default: "dev"
 
 permissions:
   contents: read
@@ -11,10 +17,25 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+
+    # Auto-run only when Build & Push succeeded on dev branch
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev')
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve deploy tag
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            # For workflow_run we deploy the dev tag
+            echo "tag=dev" >> $GITHUB_OUTPUT
+          fi
 
       - name: Upload staging compose
         uses: appleboy/scp-action@v0.1.7
@@ -39,8 +60,12 @@ jobs:
 
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
 
-            DEPLOY_TAG="dev"
+            DEPLOY_TAG="${{ steps.resolve.outputs.tag }}"
             echo "Deploying staging tag: ${DEPLOY_TAG}"
+
+            # Ensure images exist before pulling (defensive; should already exist after workflow_run)
+            docker manifest inspect "ghcr.io/vadymdenysiuk/crypto-portfolio-api:${DEPLOY_TAG}" >/dev/null
+            docker manifest inspect "ghcr.io/vadymdenysiuk/crypto-portfolio-worker:${DEPLOY_TAG}" >/dev/null
 
             TAG="${DEPLOY_TAG}" docker compose --env-file .env.staging pull
             TAG="${DEPLOY_TAG}" docker compose --profile ops --env-file .env.staging run --rm migrate
