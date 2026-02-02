@@ -1,0 +1,31 @@
+name: PR Gate - Staging Health
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  staging-health:
+    if: ${{ github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check staging API /healthz
+        run: |
+          set -euo pipefail
+          URL="https://staging-api.cpt-lab.website/healthz"
+          for i in {1..30}; do
+            if curl -fsS --retry 2 --retry-delay 1 "$URL" >/dev/null; then
+              echo "OK: $URL"
+              exit 0
+            fi
+            echo "Waiting for staging... ($i/30)"
+            sleep 4
+          done
+          echo "FAIL: $URL"
+          exit 1
