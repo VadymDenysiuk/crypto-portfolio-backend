@@ -34,7 +34,7 @@ jobs:
           if [ -n "${{ inputs.tag }}" ]; then
             echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
           else
-            echo "tag=sha-${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "tag=sha-$(echo "${{ github.sha }}" | cut -c1-7)" >> $GITHUB_OUTPUT
           fi
 
       - name: Deploy via SSH
@@ -83,3 +83,29 @@ jobs:
           done
           echo "API healthcheck FAILED"
           exit 1
+
+      - name: Verify PROD version matches deployed tag (sha-* check)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+          URL="https://api.cpt-lab.website/version"
+          DEPLOY_TAG="${{ steps.resolve.outputs.tag }}"
+
+          echo "Deploy tag: ${DEPLOY_TAG}"
+          RESP="$(curl -fsS "$URL")"
+          echo "$RESP"
+
+          ACTUAL_SHA="$(echo "$RESP" | jq -r .sha)"
+          echo "Actual sha: ${ACTUAL_SHA}"
+
+          # If we deployed sha-xxxxxxx tag, enforce exact prefix match
+          if [[ "$DEPLOY_TAG" == sha-* ]]; then
+            EXPECTED_PREFIX="${DEPLOY_TAG#sha-}"
+            echo "Expected sha prefix: ${EXPECTED_PREFIX}"
+            test "${ACTUAL_SHA:0:${#EXPECTED_PREFIX}}" = "$EXPECTED_PREFIX"
+          else
+            # For non-sha tags (main, vX.Y.Z) — just ensure sha is present
+            test "$ACTUAL_SHA" != "unknown"
+          fi
