@@ -9,6 +9,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { bullConnection } from './bullmq/bullmq.connection';
 import { PortfolioModule } from './portfolio/portfolio.module';
 import { HealthModule } from './health/health.module';
+import { VersionController } from './version/version.controller';
 
 @Module({
   imports: [
@@ -23,7 +24,7 @@ import { HealthModule } from './health/health.module';
     PortfolioModule,
     HealthModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, VersionController],
   providers: [AppService],
 })
 export class AppModule {}

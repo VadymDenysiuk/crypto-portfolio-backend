@@ -45,6 +45,14 @@ ARG PNPM_VERSION=10.28.1
 RUN corepack enable \
   && corepack prepare pnpm@${PNPM_VERSION} --activate
 
+ARG GIT_SHA=unknown
+ARG GIT_REF=unknown
+ARG BUILD_DATE=unknown
+
+ENV GIT_SHA=$GIT_SHA
+ENV GIT_REF=$GIT_REF
+ENV BUILD_DATE=$BUILD_DATE
+
 # workspace files (needed for pnpm --filter at runtime if you ever need it)
 COPY --from=prod-deps /app/package.json ./package.json
 COPY --from=prod-deps /app/pnpm-lock.yaml ./pnpm-lock.yaml
