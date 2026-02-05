@@ -8,24 +8,42 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: pr-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
-  staging-health:
+  staging-gate:
     if: ${{ github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
 
     steps:
-      - name: Check staging API /healthz
+      - name: Wait for staging /healthz
         run: |
           set -euo pipefail
           URL="https://staging-api.cpt-lab.website/healthz"
-          for i in {1..30}; do
+          for i in {1..45}; do
             if curl -fsS --retry 2 --retry-delay 1 "$URL" >/dev/null; then
               echo "OK: $URL"
               exit 0
             fi
-            echo "Waiting for staging... ($i/30)"
+            echo "Waiting for staging health... ($i/45)"
             sleep 4
           done
-          echo "FAIL: $URL"
+          echo "FAIL: staging healthcheck did not pass"
           exit 1
+
+      - name: Verify staging /version sha matches PR head sha
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+          EXPECTED="${{ github.event.pull_request.head.sha }}"
+          ACTUAL="$(curl -fsS https://staging-api.cpt-lab.website/version | jq -r .sha)"
+
+          echo "expected=$EXPECTED"
+          echo "actual=$ACTUAL"
+
+          test "$EXPECTED" = "$ACTUAL"
