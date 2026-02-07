@@ -1,4 +1,4 @@
-name: PR Gate - Staging Health
+name: staging-health
 
 on:
   pull_request:
@@ -13,13 +13,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  staging-gate:
+  staging-health:
     if: ${{ github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 6
 
     steps:
       - name: Wait for staging /healthz
+        shell: bash
         run: |
           set -euo pipefail
           URL="https://staging-api.cpt-lab.website/healthz"
@@ -34,16 +35,27 @@ jobs:
           echo "FAIL: staging healthcheck did not pass"
           exit 1
 
-      - name: Verify staging /version sha matches PR head sha
+      - name: Verify staging /version sha matches dev HEAD (prefix)
+        shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -y
           sudo apt-get install -y jq
 
-          EXPECTED="${{ github.event.pull_request.head.sha }}"
-          ACTUAL="$(curl -fsS https://staging-api.cpt-lab.website/version | jq -r .sha)"
+          # staging у тебе деплоїться з dev, тому звіряємося з HEAD гілки dev
+          DEV_SHA="$(curl -fsSL \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/commits/dev" | jq -r .sha)"
 
-          echo "expected=$EXPECTED"
-          echo "actual=$ACTUAL"
+          EXPECTED_SHORT="$(echo "$DEV_SHA" | cut -c1-7)"
 
-          test "$EXPECTED" = "$ACTUAL"
+          ACTUAL_SHA="$(curl -fsS https://staging-api.cpt-lab.website/version | jq -r .sha)"
+          ACTUAL_SHORT="$(echo "$ACTUAL_SHA" | cut -c1-7)"
+
+          echo "expected_dev=$DEV_SHA"
+          echo "expected_short=$EXPECTED_SHORT"
+          echo "actual=$ACTUAL_SHA"
+          echo "actual_short=$ACTUAL_SHORT"
+
+          test "$EXPECTED_SHORT" = "$ACTUAL_SHORT"
