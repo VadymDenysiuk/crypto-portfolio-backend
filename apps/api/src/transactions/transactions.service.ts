@@ -41,6 +41,7 @@ export class TransactionsService {
     });
 
     await this.redisService.redis.del(`portfolio:summary:${portfolioId}`);
+    await this.redisService.redis.del(`portfolio:positions:${portfolioId}`);
 
     try {
       await this.portfolioQueue.add(
