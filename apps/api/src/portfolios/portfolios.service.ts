@@ -5,8 +5,8 @@ import { CreatePortfolioDto } from './dto/create-portfolio.dto';
 import { RedisService } from 'src/redis/redis.service';
 import { safeParseJson } from 'src/utils/json';
 import { PortfolioSummary } from './portfolio.types';
-import { Prisma } from '@prisma/client';
 import type { PortfolioPositions } from './portfolio.positions.types';
+import { calculatePositionsAverageCost } from '@cpt/db';
 
 @Injectable()
 export class PortfoliosService {
@@ -145,115 +145,22 @@ export class PortfoliosService {
       orderBy: { at: 'asc' },
     });
 
-    const D = Prisma.Decimal;
-    const zero = new D(0);
-
-    type State = {
-      qty: Prisma.Decimal;
-      cost: Prisma.Decimal;
-      realized: Prisma.Decimal;
-      missingPrice: boolean;
-      oversold: boolean;
-    };
-
-    const stateBySymbol: Record<string, State> = {};
-
-    for (const t of txs) {
-      const sym = t.asset.symbol;
-      const st =
-        stateBySymbol[sym] ??
-        (stateBySymbol[sym] = {
-          qty: new D(0),
-          cost: new D(0),
-          realized: new D(0),
-          missingPrice: false,
-          oversold: false,
-        });
-
-      const qty = t.quantity ?? zero;
-      const price = t.price;
-
-      if (price == null) st.missingPrice = true;
-      const priceD = price ?? zero;
-
-      if (t.type === 'BUY') {
-        st.qty = st.qty.add(qty);
-        st.cost = st.cost.add(qty.mul(priceD));
-        continue;
-      }
-
-      if (t.type === 'SELL') {
-        const avg = st.qty.gt(0) ? st.cost.div(st.qty) : zero;
-
-        let sellQty = qty;
-        if (sellQty.gt(st.qty)) {
-          st.oversold = true;
-          sellQty = st.qty;
-        }
-        if (sellQty.lte(0)) continue;
-
-        const costBasisSold = avg.mul(sellQty);
-        const proceeds = priceD.mul(sellQty);
-
-        st.realized = st.realized.add(proceeds.sub(costBasisSold));
-
-        st.qty = st.qty.sub(sellQty);
-        st.cost = st.cost.sub(costBasisSold);
-
-        if (st.qty.lte(0)) {
-          st.qty = new D(0);
-          st.cost = new D(0);
-        }
-      }
-    }
-
-    const symbols = Object.entries(stateBySymbol)
-      .filter(([, st]) => st.qty.gt(0) || !st.realized.equals(0))
-      .map(([s]) => s);
-
+    const symbols = [...new Set(txs.map((t) => t.asset.symbol))];
     const currency = portfolio.baseCurrency.toUpperCase();
     const latest = await this.prices.latest(symbols, currency);
-    const prices = latest.prices;
 
-    let totalValue = new D(0);
-    let totalCost = new D(0);
-    let unrealizedPnl = new D(0);
-    let realizedPnl = new D(0);
-
-    const missingTxPrices: string[] = [];
-    const oversold: string[] = [];
-
-    const positions = symbols.map((sym) => {
-      const st = stateBySymbol[sym];
-      if (st.missingPrice) missingTxPrices.push(sym);
-      if (st.oversold) oversold.push(sym);
-
-      const priceNow = prices[sym] ?? 0;
-      const priceNowD = new D(priceNow);
-
-      const value = st.qty.mul(priceNowD);
-      const costValue = st.cost;
-      const avgCost = st.qty.gt(0) ? st.cost.div(st.qty) : null;
-      const uPnl = st.qty.gt(0) ? value.sub(costValue) : null;
-
-      totalValue = totalValue.add(value);
-      totalCost = totalCost.add(costValue);
-      realizedPnl = realizedPnl.add(st.realized);
-      if (uPnl) unrealizedPnl = unrealizedPnl.add(uPnl);
-
-      return {
-        symbol: sym,
-        quantity: st.qty.toString(),
-        avgCost: avgCost?.toString() ?? null,
-        costValue: st.qty.gt(0) ? costValue.toString() : null,
-
-        price: priceNow,
-        value: value.toString(),
-
-        unrealizedPnl: uPnl?.toString() ?? null,
-        realizedPnl: st.realized.toString(),
-      };
-    });
+    const buySellTxs = txs
+      .filter(
+        (t): t is typeof t & { type: 'BUY' | 'SELL' } =>
+          t.type === 'BUY' || t.type === 'SELL',
+      )
+      .map((t) => ({
+        type: t.type,
+        symbol: t.asset.symbol,
+        quantity: t.quantity,
+        price: t.price,
+      }));
+    const calc = calculatePositionsAverageCost(buySellTxs, latest.prices);
 
     const result: PortfolioPositions = {
       portfolio: { id: portfolio.id, name: portfolio.name, currency },
@@ -262,23 +169,24 @@ export class PortfoliosService {
       pricesAt: latest.at,
 
       totals: {
-        totalValue: totalValue.toString(),
-        totalCost: totalCost.toString(),
-        unrealizedPnl: unrealizedPnl.toString(),
-        realizedPnl: realizedPnl.toString(),
+        totalValue: calc.totals.totalValue.toString(),
+        totalCost: calc.totals.totalCost.toString(),
+        unrealizedPnl: calc.totals.unrealizedPnl.toString(),
+        realizedPnl: calc.totals.realizedPnl.toString(),
       },
 
-      positions,
+      positions: calc.positions.map((p) => ({
+        symbol: p.symbol,
+        quantity: p.quantity.toString(),
+        avgCost: p.avgCost?.toString() ?? null,
+        costValue: p.costValue?.toString() ?? null,
+        price: p.price,
+        value: p.value.toString(),
+        unrealizedPnl: p.unrealizedPnl?.toString() ?? null,
+        realizedPnl: p.realizedPnl.toString(),
+      })),
 
-      warnings:
-        missingTxPrices.length || oversold.length
-          ? {
-              missingTxPrices: missingTxPrices.length
-                ? missingTxPrices
-                : undefined,
-              oversold: oversold.length ? oversold : undefined,
-            }
-          : undefined,
+      warnings: calc.warnings,
     };
 
     await this.redisService.redis.set(

@@ -48,14 +48,18 @@ export class TransactionsService {
         'recalc-summary',
         { portfolioId },
         {
-          jobId: `recalc-summary:${portfolioId}`,
-          removeOnComplete: false,
+          jobId: `recalc-summary-${portfolioId}`,
+          removeOnComplete: 1000,
           removeOnFail: 100,
           attempts: 3,
           backoff: { type: 'exponential', delay: 2000 },
+          delay: 1500,
         },
       );
     } catch (e) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const msg = String(e?.message ?? '');
+      if (msg.includes('Job') && msg.includes('already exists')) return;
       console.error(e);
     }
 
