@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cpt-postgres
+    environment:
+      POSTGRES_DB: cpt
+      POSTGRES_USER: cpt
+      POSTGRES_PASSWORD: cpt
+    ports:
+      - "5433:5432"
+    volumes:
+      - cpt_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cpt -d cpt"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: cpt-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - cpt_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    image: node:20-alpine
+    container_name: cpt-api-dev
+    working_dir: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://cpt:cpt@postgres:5432/cpt?schema=public
+      REDIS_URL: redis://redis:6379
+      PORT: "3000"
+      NODE_ENV: development
+    volumes:
+      - ../..:/app
+      - cpt_node_modules:/app/node_modules
+    ports:
+      - "3000:3000"
+    command: sh -lc "corepack enable && pnpm install && pnpm --filter api start:dev"
+
+  worker:
+    image: node:20-alpine
+    container_name: cpt-worker-dev
+    working_dir: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://cpt:cpt@postgres:5432/cpt?schema=public
+      REDIS_URL: redis://redis:6379
+      PORT: "3001"
+      NODE_ENV: development
+    volumes:
+      - ../..:/app
+      - cpt_node_modules:/app/node_modules
+    ports:
+      - "3001:3001"
+    command: sh -lc "corepack enable && pnpm install && pnpm --filter worker start:dev"
+
+volumes:
+  cpt_pg:
+  cpt_redis:
+  cpt_node_modules:

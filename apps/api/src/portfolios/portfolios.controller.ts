@@ -20,4 +20,9 @@ export class PortfoliosController {
   summary(@Param('id') id: string) {
     return this.portfolios.summary(id);
   }
+
+  @Get(':id/positions')
+  positions(@Param('id') id: string) {
+    return this.portfolios.positions(id);
+  }
 }
