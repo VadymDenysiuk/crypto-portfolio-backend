@@ -1,5 +1,6 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import type { Job } from 'bullmq';
+import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
+import { Logger } from '@nestjs/common';
+import type { Job, Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { calculatePositionsAverageCost } from '@cpt/db';
@@ -8,9 +9,12 @@ type CachedLatest = { at: string; prices: Record<string, number> };
 
 @Processor('portfolio')
 export class PortfolioProcessor extends WorkerHost {
+  private readonly logger = new Logger(PortfolioProcessor.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redisService: RedisService,
+    @InjectQueue('portfolio') private readonly portfolioQueue: Queue,
   ) {
     super();
   }
@@ -18,13 +22,19 @@ export class PortfolioProcessor extends WorkerHost {
   async process(job: Job<{ portfolioId: string }>) {
     if (job.name !== 'recalc-summary') return;
 
+    const startedAt = Date.now();
     const { portfolioId } = job.data;
+
+    const dirtyKey = `portfolio:dirty:${portfolioId}`;
 
     const portfolio = await this.prisma.client.portfolio.findUnique({
       where: { id: portfolioId },
       select: { id: true, name: true, baseCurrency: true },
     });
-    if (!portfolio) return;
+    if (!portfolio) {
+      this.logger.warn(`portfolio not found: ${portfolioId}`);
+      return;
+    }
 
     const txs = await this.prisma.client.transaction.findMany({
       where: { portfolioId },
@@ -49,8 +59,7 @@ export class PortfolioProcessor extends WorkerHost {
         price: t.price, // Prisma.Decimal | null
       }));
 
-    const currency = portfolio.baseCurrency.toUpperCase();
-
+    const currency = (portfolio.baseCurrency || 'USD').toUpperCase();
     const symbols = [...new Set(buySellTxs.map((t) => t.symbol))];
 
     const assetIdBySymbol: Record<string, string> = {};
@@ -63,6 +72,7 @@ export class PortfolioProcessor extends WorkerHost {
     );
 
     const calc = calculatePositionsAverageCost(buySellTxs, prices);
+    const computedAt = new Date().toISOString();
 
     const positionsPayload = {
       portfolio: { id: portfolio.id, name: portfolio.name, currency },
@@ -85,14 +95,8 @@ export class PortfolioProcessor extends WorkerHost {
         realizedPnl: p.realizedPnl.toString(),
       })),
       warnings: calc.warnings,
+      computedAt,
     };
-
-    await this.redisService.redis.set(
-      `portfolio:positions:${portfolioId}`,
-      JSON.stringify(positionsPayload),
-      'EX',
-      60 * 10,
-    );
 
     const rows = calc.positions
       .filter((p) => p.quantity.gt(0))
@@ -114,15 +118,65 @@ export class PortfolioProcessor extends WorkerHost {
       totalCost: positionsPayload.totals.totalCost,
       unrealizedPnl: positionsPayload.totals.unrealizedPnl,
       realizedPnl: positionsPayload.totals.realizedPnl,
-      updatedAt: new Date().toISOString(),
+      computedAt,
     };
 
-    await this.redisService.redis.set(
-      `portfolio:summary:${portfolioId}`,
-      JSON.stringify(summary),
-      'EX',
-      60 * 10,
+    const ttlSec = 60 * 10;
+    const positionsKey = `portfolio:positions:${portfolioId}`;
+    const summaryKey = `portfolio:summary:${portfolioId}`;
+
+    await this.redisService.redis
+      .multi()
+      .set(positionsKey, JSON.stringify(positionsPayload), 'EX', ttlSec)
+      .set(summaryKey, JSON.stringify(summary), 'EX', ttlSec)
+      .exec();
+
+    const dirtyAtAfter = Number(
+      (await this.redisService.redis.get(dirtyKey)) || '0',
     );
+
+    if (dirtyAtAfter > startedAt) {
+      const followupJobId = `recalc-summary-${portfolioId}-${dirtyAtAfter}`;
+
+      this.logger.warn(
+        `dirty updated during recalc, scheduling follow-up: ${followupJobId}`,
+      );
+
+      try {
+        await this.portfolioQueue.add(
+          'recalc-summary',
+          { portfolioId },
+          {
+            jobId: followupJobId,
+            removeOnComplete: true,
+            removeOnFail: 100,
+            attempts: 5,
+            backoff: { type: 'exponential', delay: 2000 },
+            delay: 250,
+          },
+        );
+      } catch (e) {
+        this.logger.error(`failed to enqueue follow-up`, e);
+      }
+
+      return;
+    }
+
+    await this.redisService.redis.eval(
+      `
+      local v = redis.call("GET", KEYS[1])
+      if not v then return 0 end
+      if tonumber(v) <= tonumber(ARGV[1]) then
+        return redis.call("DEL", KEYS[1])
+      end
+      return 0
+      `,
+      1,
+      dirtyKey,
+      String(startedAt),
+    );
+
+    this.logger.log(`recalc done for ${portfolioId} at ${computedAt}`);
   }
 
   private async getLatestPrices(
@@ -151,7 +205,7 @@ export class PortfolioProcessor extends WorkerHost {
       };
     }
 
-    // 2) fallback: latest from DB (по одному символу як у тебе було)
+    // 2) fallback: latest from DB
     const prices: Record<string, number> = {};
     let latestAtMs: number | null = null;
 

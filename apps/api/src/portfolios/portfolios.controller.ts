@@ -25,4 +25,9 @@ export class PortfoliosController {
   positions(@Param('id') id: string) {
     return this.portfolios.positions(id);
   }
+
+  @Get(':id/snapshot')
+  snapshot(@Param('id') id: string) {
+    return this.portfolios.snapshot(id);
+  }
 }

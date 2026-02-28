@@ -15,11 +15,10 @@ function toDecimalString(v: string | number, field: string): string {
     throw new BadRequestException(`${field} is required`);
   }
 
-  const raw = typeof v === 'number' ? v : String(v).trim();
-  if (raw === ('' as any))
-    throw new BadRequestException(`${field} is required`);
+  const raw = typeof v === 'number' ? String(v) : String(v).trim();
+  if (!raw) throw new BadRequestException(`${field} is required`);
 
-  const normalized = typeof raw === 'string' ? raw.replace(',', '.') : raw;
+  const normalized = raw.replace(',', '.');
 
   try {
     const d = new Prisma.Decimal(normalized as any);
@@ -77,8 +76,8 @@ export class TransactionsService {
       include: { asset: { select: { symbol: true } } },
     });
 
-    await this.redisService.redis.del(`portfolio:summary:${portfolioId}`);
-    await this.redisService.redis.del(`portfolio:positions:${portfolioId}`);
+    const dirtyKey = `portfolio:dirty:${portfolioId}`;
+    await this.redisService.redis.set(dirtyKey, String(Date.now()), 'EX', 300);
 
     try {
       await this.portfolioQueue.add(
@@ -86,18 +85,21 @@ export class TransactionsService {
         { portfolioId },
         {
           jobId: `recalc-summary-${portfolioId}`,
-          removeOnComplete: 1000,
+          removeOnComplete: true,
           removeOnFail: 100,
-          attempts: 3,
+          attempts: 5,
           backoff: { type: 'exponential', delay: 2000 },
-          delay: 1500,
+          delay: 250,
         },
       );
     } catch (e) {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       const msg = String(e?.message ?? '');
-      if (msg.includes('Job') && msg.includes('already exists')) return;
-      console.error(e);
+      if (msg.includes('already exists') || msg.includes('Job')) {
+        // не return, бо треба повернути tx
+      } else {
+        console.error(e);
+      }
     }
 
     return tx;

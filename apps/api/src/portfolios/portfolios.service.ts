@@ -1,20 +1,44 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import type { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
-import { PricesService } from '../prices/prices.service';
 import { CreatePortfolioDto } from './dto/create-portfolio.dto';
 import { RedisService } from 'src/redis/redis.service';
 import { safeParseJson } from 'src/utils/json';
-import { PortfolioSummary } from './portfolio.types';
-import type { PortfolioPositions } from './portfolio.positions.types';
-import { calculatePositionsAverageCost } from '@cpt/db';
 
 @Injectable()
 export class PortfoliosService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly prices: PricesService,
     private readonly redisService: RedisService,
+    @InjectQueue('portfolio') private readonly portfolioQueue: Queue,
   ) {}
+
+  private dirtyKey(portfolioId: string) {
+    return `portfolio:dirty:${portfolioId}`;
+  }
+
+  private async enqueueRecalc(portfolioId: string) {
+    try {
+      await this.portfolioQueue.add(
+        'recalc-summary',
+        { portfolioId },
+        {
+          jobId: `recalc-summary-${portfolioId}`,
+          removeOnComplete: true,
+          removeOnFail: 100,
+          attempts: 5,
+          backoff: { type: 'exponential', delay: 2000 },
+          delay: 250,
+        },
+      );
+    } catch (e: any) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const msg = String(e?.message ?? '');
+      if (msg.includes('already exists') || msg.includes('Job')) return;
+      console.error(e);
+    }
+  }
 
   async create(dto: CreatePortfolioDto) {
     const userId = 'dev-user';
@@ -45,156 +69,118 @@ export class PortfoliosService {
     });
   }
 
-  async summary(portfolioId: string) {
-    const key = `portfolio:summary:${portfolioId}`;
-    const cached = await this.redisService.redis.get(key);
-
-    if (cached) {
-      const parsed = safeParseJson<PortfolioSummary>(cached);
-      if (parsed) return { source: 'redis' as const, ...parsed };
-    }
-
+  private async ensurePortfolioOwned(portfolioId: string) {
     const portfolio = await this.prisma.client.portfolio.findFirst({
       where: { id: portfolioId, userId: 'dev-user' },
-      select: { id: true, baseCurrency: true, name: true },
+      select: { id: true },
     });
-
     if (!portfolio) throw new NotFoundException('Portfolio not found');
+  }
 
-    const txs = await this.prisma.client.transaction.findMany({
-      where: { portfolioId },
-      select: {
-        type: true,
-        quantity: true,
-        asset: { select: { symbol: true } },
-      },
-      orderBy: { at: 'asc' },
-    });
+  async summary(portfolioId: string) {
+    const key = `portfolio:summary:${portfolioId}`;
+    const dirtyKey = this.dirtyKey(portfolioId);
 
-    const holdings: Record<string, number> = {};
-    for (const t of txs) {
-      const sym = t.asset.symbol;
-      const qty = Number(t.quantity);
-      holdings[sym] ??= 0;
+    const [cached, dirtyAt] = await Promise.all([
+      this.redisService.redis.get(key),
+      this.redisService.redis.get(dirtyKey),
+    ]);
 
-      if (t.type === 'BUY') holdings[sym] += qty;
-      else if (t.type === 'SELL') holdings[sym] -= qty;
+    if (cached) {
+      const parsed = safeParseJson(cached);
+      if (parsed) {
+        return {
+          status: 'ready' as const,
+          source: 'redis' as const,
+          stale: Boolean(dirtyAt),
+          dirtyAt: dirtyAt ? Number(dirtyAt) : null,
+          ...parsed,
+        };
+      }
     }
 
-    const symbols = Object.entries(holdings)
-      .filter(([, q]) => q > 0)
-      .map(([s]) => s);
+    await this.ensurePortfolioOwned(portfolioId);
 
-    const latest = await this.prices.latest(symbols, portfolio.baseCurrency);
-    const prices = latest.prices;
+    await this.redisService.redis.set(dirtyKey, String(Date.now()), 'EX', 300);
+    await this.enqueueRecalc(portfolioId);
 
-    let totalValue = 0;
-    const rows = symbols.map((s) => {
-      const quantity = holdings[s];
-      const price = prices[s] ?? 0;
-      const value = quantity * price;
-      totalValue += value;
-      return { symbol: s, quantity, price, value };
-    });
-
-    const result = {
-      portfolio: {
-        id: portfolio.id,
-        name: portfolio.name,
-        currency: portfolio.baseCurrency,
-      },
-      pricesSource: latest.source,
-      pricesAt: latest.at,
-      totalValue,
-      holdings: rows,
+    return {
+      status: 'pending' as const,
+      source: 'queue' as const,
+      retryAfterMs: 1500,
     };
-
-    await this.redisService.redis.set(
-      key,
-      JSON.stringify(result),
-      'EX',
-      60 * 10,
-    );
-
-    return { source: 'computed', ...result };
   }
 
   async positions(portfolioId: string) {
     const key = `portfolio:positions:${portfolioId}`;
+    const dirtyKey = this.dirtyKey(portfolioId);
 
-    const cached = await this.redisService.redis.get(key);
+    const [cached, dirtyAt] = await Promise.all([
+      this.redisService.redis.get(key),
+      this.redisService.redis.get(dirtyKey),
+    ]);
+
     if (cached) {
-      const parsed = safeParseJson<PortfolioPositions>(cached);
-      if (parsed) return { source: 'redis' as const, ...parsed };
+      const parsed = safeParseJson(cached);
+      if (parsed) {
+        return {
+          status: 'ready' as const,
+          source: 'redis' as const,
+          stale: Boolean(dirtyAt),
+          dirtyAt: dirtyAt ? Number(dirtyAt) : null,
+          ...parsed,
+        };
+      }
     }
 
-    const portfolio = await this.prisma.client.portfolio.findFirst({
-      where: { id: portfolioId, userId: 'dev-user' },
-      select: { id: true, baseCurrency: true, name: true },
-    });
-    if (!portfolio) throw new NotFoundException('Portfolio not found');
+    await this.ensurePortfolioOwned(portfolioId);
 
-    const txs = await this.prisma.client.transaction.findMany({
-      where: { portfolioId },
-      select: {
-        type: true,
-        quantity: true,
-        price: true,
-        asset: { select: { symbol: true } },
-      },
-      orderBy: { at: 'asc' },
-    });
+    await this.redisService.redis.set(dirtyKey, String(Date.now()), 'EX', 300);
+    await this.enqueueRecalc(portfolioId);
 
-    const symbols = [...new Set(txs.map((t) => t.asset.symbol))];
-    const currency = portfolio.baseCurrency.toUpperCase();
-    const latest = await this.prices.latest(symbols, currency);
-
-    const buySellTxs = txs
-      .filter(
-        (t): t is typeof t & { type: 'BUY' | 'SELL' } =>
-          t.type === 'BUY' || t.type === 'SELL',
-      )
-      .map((t) => ({
-        type: t.type,
-        symbol: t.asset.symbol,
-        quantity: t.quantity,
-        price: t.price,
-      }));
-    const calc = calculatePositionsAverageCost(buySellTxs, latest.prices);
-
-    const result: PortfolioPositions = {
-      portfolio: { id: portfolio.id, name: portfolio.name, currency },
-
-      pricesSource: latest.source,
-      pricesAt: latest.at,
-
-      totals: {
-        totalValue: calc.totals.totalValue.toString(),
-        totalCost: calc.totals.totalCost.toString(),
-        unrealizedPnl: calc.totals.unrealizedPnl.toString(),
-        realizedPnl: calc.totals.realizedPnl.toString(),
-      },
-
-      positions: calc.positions.map((p) => ({
-        symbol: p.symbol,
-        quantity: p.quantity.toString(),
-        avgCost: p.avgCost?.toString() ?? null,
-        costValue: p.costValue?.toString() ?? null,
-        price: p.price,
-        value: p.value.toString(),
-        unrealizedPnl: p.unrealizedPnl?.toString() ?? null,
-        realizedPnl: p.realizedPnl.toString(),
-      })),
-
-      warnings: calc.warnings,
+    return {
+      status: 'pending' as const,
+      source: 'queue' as const,
+      retryAfterMs: 1500,
     };
+  }
 
-    await this.redisService.redis.set(
-      key,
-      JSON.stringify(result),
-      'EX',
-      60 * 10,
-    );
-    return { source: 'computed' as const, ...result };
+  async snapshot(portfolioId: string) {
+    const summaryKey = `portfolio:summary:${portfolioId}`;
+    const positionsKey = `portfolio:positions:${portfolioId}`;
+    const dirtyKey = this.dirtyKey(portfolioId);
+
+    const [summaryStr, positionsStr, dirtyAt] = await Promise.all([
+      this.redisService.redis.get(summaryKey),
+      this.redisService.redis.get(positionsKey),
+      this.redisService.redis.get(dirtyKey),
+    ]);
+
+    const summary = summaryStr ? safeParseJson(summaryStr) : null;
+    const positions = positionsStr ? safeParseJson(positionsStr) : null;
+
+    if (summary || positions) {
+      return {
+        status: 'ready' as const,
+        source: 'redis' as const,
+        stale: Boolean(dirtyAt),
+        dirtyAt: dirtyAt ? Number(dirtyAt) : null,
+        summary,
+        positions,
+      };
+    }
+
+    await this.ensurePortfolioOwned(portfolioId);
+
+    await this.redisService.redis.set(dirtyKey, String(Date.now()), 'EX', 300);
+    await this.enqueueRecalc(portfolioId);
+
+    return {
+      status: 'pending' as const,
+      source: 'queue' as const,
+      retryAfterMs: 1500,
+      summary: null,
+      positions: null,
+    };
   }
 }
