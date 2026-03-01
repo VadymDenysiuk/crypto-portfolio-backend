@@ -156,4 +156,13 @@ export class AuthService {
       where: { userId: payloadUnknown.sub },
     });
   }
+
+  async me(userId: string) {
+    const user = await this.prisma.client.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, createdAt: true },
+    });
+    if (!user) return null;
+    return user;
+  }
 }

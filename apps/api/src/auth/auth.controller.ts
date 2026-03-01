@@ -3,6 +3,9 @@ import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { Get, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import { CurrentUser, type RequestUser } from './current-user.decorator';
 
 function getRefreshCookie(req: Request): string | null {
   const cookies = req.cookies as Record<string, unknown> | undefined;
@@ -89,5 +92,11 @@ export class AuthController {
 
     res.clearCookie('refresh_token', { path: '/auth/refresh' });
     return { status: 'ok' as const };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me')
+  async me(@CurrentUser() user: RequestUser) {
+    return { user: await this.auth.me(user.id) };
   }
 }
