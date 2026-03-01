@@ -36,14 +36,44 @@ export class TransactionsService {
     @InjectQueue('portfolio') private readonly portfolioQueue: Queue,
   ) {}
 
-  async create(dto: CreateTransactionDto) {
-    const portfolioId = dto.portfolioId;
+  private dirtyKey(portfolioId: string) {
+    return `portfolio:dirty:${portfolioId}`;
+  }
 
+  private async enqueueRecalc(portfolioId: string) {
+    try {
+      await this.portfolioQueue.add(
+        'recalc-summary',
+        { portfolioId },
+        {
+          jobId: `recalc-summary-${portfolioId}`,
+          removeOnComplete: true,
+          removeOnFail: 100,
+          attempts: 5,
+          backoff: { type: 'exponential', delay: 2000 },
+          delay: 250,
+        },
+      );
+    } catch (e: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      const msg = String((e as any)?.message ?? '');
+      if (msg.includes('already exists') || msg.includes('Job')) return;
+      console.error(e);
+    }
+  }
+
+  private async ensurePortfolioOwned(portfolioId: string, userId: string) {
     const portfolio = await this.prisma.client.portfolio.findFirst({
-      where: { id: portfolioId, userId: 'dev-user' },
+      where: { id: portfolioId, userId },
       select: { id: true },
     });
     if (!portfolio) throw new NotFoundException('Portfolio not found');
+  }
+
+  async create(dto: CreateTransactionDto, userId: string) {
+    const portfolioId = dto.portfolioId;
+
+    await this.ensurePortfolioOwned(portfolioId, userId);
 
     const asset = await this.prisma.client.asset.findUnique({
       where: { symbol: dto.assetSymbol.toUpperCase() },
@@ -69,45 +99,38 @@ export class TransactionsService {
         portfolioId,
         assetId: asset.id,
         type: dto.type,
-        quantity: quantityStr, // ✅ string Decimal
-        price: priceStr, // ✅ string Decimal | null
+        quantity: quantityStr,
+        price: priceStr,
         at: dto.at ? new Date(dto.at) : new Date(),
       },
       include: { asset: { select: { symbol: true } } },
     });
 
-    const dirtyKey = `portfolio:dirty:${portfolioId}`;
-    await this.redisService.redis.set(dirtyKey, String(Date.now()), 'EX', 300);
+    await this.redisService.redis.set(
+      this.dirtyKey(portfolioId),
+      String(Date.now()),
+      'EX',
+      300,
+    );
 
-    try {
-      await this.portfolioQueue.add(
-        'recalc-summary',
-        { portfolioId },
-        {
-          jobId: `recalc-summary-${portfolioId}`,
-          removeOnComplete: true,
-          removeOnFail: 100,
-          attempts: 5,
-          backoff: { type: 'exponential', delay: 2000 },
-          delay: 250,
-        },
-      );
-    } catch (e) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      const msg = String(e?.message ?? '');
-      if (msg.includes('already exists') || msg.includes('Job')) {
-        // не return, бо треба повернути tx
-      } else {
-        console.error(e);
-      }
-    }
+    await this.enqueueRecalc(portfolioId);
 
     return tx;
   }
 
-  list(portfolioId?: string) {
+  async list(userId: string, portfolioId?: string) {
+    if (portfolioId) {
+      await this.ensurePortfolioOwned(portfolioId, userId);
+
+      return this.prisma.client.transaction.findMany({
+        where: { portfolioId },
+        orderBy: { at: 'desc' },
+        include: { asset: { select: { symbol: true } } },
+      });
+    }
+
     return this.prisma.client.transaction.findMany({
-      where: portfolioId ? { portfolioId } : undefined,
+      where: { portfolio: { userId } },
       orderBy: { at: 'desc' },
       include: { asset: { select: { symbol: true } } },
     });
