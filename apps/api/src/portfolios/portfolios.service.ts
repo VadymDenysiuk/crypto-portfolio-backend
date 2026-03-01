@@ -32,7 +32,7 @@ export class PortfoliosService {
           delay: 250,
         },
       );
-    } catch (e: any) {
+    } catch (e) {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       const msg = String(e?.message ?? '');
       if (msg.includes('already exists') || msg.includes('Job')) return;
@@ -40,19 +40,7 @@ export class PortfoliosService {
     }
   }
 
-  async create(dto: CreatePortfolioDto) {
-    const userId = 'dev-user';
-
-    await this.prisma.client.user.upsert({
-      where: { id: userId },
-      update: {},
-      create: {
-        id: userId,
-        email: 'dev@local',
-        passwordHash: 'dev',
-      },
-    });
-
+  async create(dto: CreatePortfolioDto, userId: string) {
     return this.prisma.client.portfolio.create({
       data: {
         userId,
@@ -62,22 +50,22 @@ export class PortfoliosService {
     });
   }
 
-  list() {
+  list(userId: string) {
     return this.prisma.client.portfolio.findMany({
-      where: { userId: 'dev-user' },
+      where: { userId },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  private async ensurePortfolioOwned(portfolioId: string) {
+  private async ensurePortfolioOwned(portfolioId: string, userId: string) {
     const portfolio = await this.prisma.client.portfolio.findFirst({
-      where: { id: portfolioId, userId: 'dev-user' },
+      where: { id: portfolioId, userId },
       select: { id: true },
     });
     if (!portfolio) throw new NotFoundException('Portfolio not found');
   }
 
-  async summary(portfolioId: string) {
+  async summary(portfolioId: string, userId: string) {
     const key = `portfolio:summary:${portfolioId}`;
     const dirtyKey = this.dirtyKey(portfolioId);
 
@@ -90,8 +78,8 @@ export class PortfoliosService {
       const parsed = safeParseJson(cached);
       if (parsed) {
         return {
-          status: 'ready' as const,
-          source: 'redis' as const,
+          status: 'ready',
+          source: 'redis',
           stale: Boolean(dirtyAt),
           dirtyAt: dirtyAt ? Number(dirtyAt) : null,
           ...parsed,
@@ -99,19 +87,15 @@ export class PortfoliosService {
       }
     }
 
-    await this.ensurePortfolioOwned(portfolioId);
+    await this.ensurePortfolioOwned(portfolioId, userId);
 
     await this.redisService.redis.set(dirtyKey, String(Date.now()), 'EX', 300);
     await this.enqueueRecalc(portfolioId);
 
-    return {
-      status: 'pending' as const,
-      source: 'queue' as const,
-      retryAfterMs: 1500,
-    };
+    return { status: 'pending', source: 'queue', retryAfterMs: 1500 };
   }
 
-  async positions(portfolioId: string) {
+  async positions(portfolioId: string, userId: string) {
     const key = `portfolio:positions:${portfolioId}`;
     const dirtyKey = this.dirtyKey(portfolioId);
 
@@ -124,8 +108,8 @@ export class PortfoliosService {
       const parsed = safeParseJson(cached);
       if (parsed) {
         return {
-          status: 'ready' as const,
-          source: 'redis' as const,
+          status: 'ready',
+          source: 'redis',
           stale: Boolean(dirtyAt),
           dirtyAt: dirtyAt ? Number(dirtyAt) : null,
           ...parsed,
@@ -133,19 +117,15 @@ export class PortfoliosService {
       }
     }
 
-    await this.ensurePortfolioOwned(portfolioId);
+    await this.ensurePortfolioOwned(portfolioId, userId);
 
     await this.redisService.redis.set(dirtyKey, String(Date.now()), 'EX', 300);
     await this.enqueueRecalc(portfolioId);
 
-    return {
-      status: 'pending' as const,
-      source: 'queue' as const,
-      retryAfterMs: 1500,
-    };
+    return { status: 'pending', source: 'queue', retryAfterMs: 1500 };
   }
 
-  async snapshot(portfolioId: string) {
+  async snapshot(portfolioId: string, userId: string) {
     const summaryKey = `portfolio:summary:${portfolioId}`;
     const positionsKey = `portfolio:positions:${portfolioId}`;
     const dirtyKey = this.dirtyKey(portfolioId);
@@ -170,7 +150,7 @@ export class PortfoliosService {
       };
     }
 
-    await this.ensurePortfolioOwned(portfolioId);
+    await this.ensurePortfolioOwned(portfolioId, userId);
 
     await this.redisService.redis.set(dirtyKey, String(Date.now()), 'EX', 300);
     await this.enqueueRecalc(portfolioId);
