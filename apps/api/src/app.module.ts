@@ -11,6 +11,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { bullConnection } from './bullmq/bullmq.connection';
 import { HealthModule } from './health/health.module';
 import { VersionController } from './version/version.controller';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { VersionController } from './version/version.controller';
     }),
     BullModule.registerQueue({ name: 'portfolio' }),
     HealthModule,
+    AuthModule,
   ],
   controllers: [AppController, VersionController],
   providers: [AppService],

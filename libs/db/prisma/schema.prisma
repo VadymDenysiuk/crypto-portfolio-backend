@@ -8,12 +8,28 @@ datasource db {
 }
 
 model User {
-    id           String   @id @default(cuid())
-    email        String   @unique
-    passwordHash String
-    createdAt    DateTime @default(now())
+    id            String         @id @default(cuid())
+    email         String         @unique
+    passwordHash  String
+    portfolios    Portfolio[]
+    refreshTokens RefreshToken[]
 
-    portfolios Portfolio[]
+    createdAt DateTime @default(now())
+    updatedAt DateTime @default(now()) @updatedAt
+}
+
+model RefreshToken {
+    id        String   @id @default(cuid())
+    userId    String
+    tokenHash String
+    expiresAt DateTime
+    createdAt DateTime @default(now())
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([userId, tokenHash])
+    @@index([userId])
+    @@index([expiresAt])
 }
 
 model Portfolio {

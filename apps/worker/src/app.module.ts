@@ -20,7 +20,6 @@ import { VersionController } from './version/version.controller';
     BullModule.forRoot({
       connection: bullConnection(),
     }),
-    BullModule.registerQueue({ name: 'portfolio' }),
     PortfolioModule,
     HealthModule,
   ],
